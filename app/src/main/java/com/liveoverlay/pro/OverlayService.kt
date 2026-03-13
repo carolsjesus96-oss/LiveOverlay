@@ -12,11 +12,10 @@ import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.view.*
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.webkit.*
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.TextView
 import androidx.core.app.NotificationCompat
 import kotlin.math.atan2
 
@@ -25,6 +24,7 @@ class OverlayService : Service() {
     private lateinit var windowManager: WindowManager
     private lateinit var rootView: FrameLayout
     private lateinit var container: FrameLayout
+    private lateinit var btnClose: TextView
     private lateinit var params: WindowManager.LayoutParams
     
     // Gesture state
@@ -37,6 +37,7 @@ class OverlayService : Service() {
     private var rotationAngle = 0f
     
     private lateinit var scaleDetector: ScaleGestureDetector
+    private lateinit var gestureDetector: GestureDetector
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -44,7 +45,7 @@ class OverlayService : Service() {
         super.onCreate()
         createNotificationChannel()
         val notification = NotificationCompat.Builder(this, "PRO_CHANNEL")
-            .setContentTitle("LiveOverlay Steath")
+            .setContentTitle("LiveOverlay Stealth")
             .setContentText("Controle por gestos ativo")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .build()
@@ -85,15 +86,31 @@ class OverlayService : Service() {
                 settings.apply {
                     javaScriptEnabled = true
                     domStorageEnabled = true
+                    mediaPlaybackRequiresUserGesture = false
                     mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                 }
                 webViewClient = WebViewClient()
+                webChromeClient = WebChromeClient()
                 loadUrl(url)
             }
             container.addView(webView)
         }
 
         rootView.addView(container)
+
+        // Botão Fechar Fantasma (X)
+        btnClose = TextView(this).apply {
+            text = "✕"
+            setTextColor(Color.WHITE)
+            textSize = 16f
+            setShadowLayer(4f, 2f, 2f, Color.BLACK)
+            visibility = View.GONE
+            val size = (32 * resources.displayMetrics.density).toInt()
+            layoutParams = FrameLayout.LayoutParams(size, size, Gravity.TOP or Gravity.END)
+            gravity = Gravity.CENTER
+            setOnClickListener { stopSelf() }
+        }
+        rootView.addView(btnClose)
 
         // Glass Pane - Interceptor de toques
         val glassPane = View(this).apply {
@@ -114,7 +131,7 @@ class OverlayService : Service() {
         }
 
         params = WindowManager.LayoutParams(
-            600, 600, // Tamanho base
+            800, 800, // Tamanho base corrigido
             type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
@@ -144,10 +161,18 @@ class OverlayService : Service() {
             }
         })
 
+        gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                btnClose.visibility = if (btnClose.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                return true
+            }
+        })
+
         var lastRotation = 0f
 
         view.setOnTouchListener { _, event ->
             scaleDetector.onTouchEvent(event)
+            gestureDetector.onTouchEvent(event)
             
             val pointerCount = event.pointerCount
 
