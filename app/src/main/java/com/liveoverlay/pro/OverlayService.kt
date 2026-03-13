@@ -22,9 +22,9 @@ import kotlin.math.atan2
 class OverlayService : Service() {
 
     private lateinit var windowManager: WindowManager
-    private lateinit var rootView: FrameLayout
-    private lateinit var container: FrameLayout
-    private lateinit var btnClose: TextView
+    private var rootView: FrameLayout? = null
+    private var container: FrameLayout? = null
+    private var btnClose: TextView? = null
     private lateinit var params: WindowManager.LayoutParams
     
     // Gesture state
@@ -58,7 +58,7 @@ class OverlayService : Service() {
         val url = intent?.getStringExtra("URL")
         val imageUriString = intent?.getStringExtra("IMAGE_URI")
         
-        if (::rootView.isInitialized && rootView.isAttachedToWindow) {
+        if (rootView != null && rootView!!.isAttachedToWindow()) {
             // Se já existe, apenas atualiza o conteúdo se necessário
             updateContent(url, imageUriString)
         } else {
@@ -68,13 +68,14 @@ class OverlayService : Service() {
     }
 
     private fun updateContent(url: String?, imageUriString: String?) {
-        container.removeAllViews()
+        val currentContainer = container ?: return
+        currentContainer.removeAllViews()
         if (!imageUriString.isNullOrEmpty()) {
             val imageView = ImageView(this).apply {
                 setImageURI(Uri.parse(imageUriString))
                 scaleType = ImageView.ScaleType.FIT_CENTER
             }
-            container.addView(imageView)
+            currentContainer.addView(imageView)
         } else if (!url.isNullOrEmpty()) {
             val webView = WebView(this).apply {
                 setLayerType(View.LAYER_TYPE_HARDWARE, null)
@@ -89,24 +90,25 @@ class OverlayService : Service() {
                 webChromeClient = WebChromeClient()
                 loadUrl(url)
             }
-            container.addView(webView)
+            currentContainer.addView(webView)
         }
     }
 
     @SuppressLint("ClickableViewAccessibility")
     private fun setupStealthOverlay(url: String?, imageUriString: String?) {
-        // Root invisível
-        rootView = FrameLayout(this).apply {
+        val mainRoot = FrameLayout(this).apply {
             setBackgroundColor(Color.TRANSPARENT)
         }
+        rootView = mainRoot
 
-        container = FrameLayout(this).apply {
+        val mainContainer = FrameLayout(this).apply {
             setBackgroundColor(Color.TRANSPARENT)
         }
+        container = mainContainer
         
         // Adiciona container de conteúdo
         updateContent(url, imageUriString)
-        rootView.addView(container)
+        mainRoot.addView(mainContainer)
 
         // Glass Pane - Interceptor de toques (deve ficar ABAIXO do botão X)
         val glassPane = View(this).apply {
@@ -116,10 +118,10 @@ class OverlayService : Service() {
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
         }
-        rootView.addView(glassPane)
+        mainRoot.addView(glassPane)
 
         // Botão Fechar Fantasma (X) - Deve ser o ÚLTIMO a ser adicionado para ficar no topo
-        btnClose = TextView(this).apply {
+        val closeBtn = TextView(this).apply {
             text = "✕"
             setTextColor(Color.WHITE)
             textSize = 20f
@@ -129,13 +131,16 @@ class OverlayService : Service() {
             layoutParams = FrameLayout.LayoutParams(size, size, Gravity.TOP or Gravity.END)
             gravity = Gravity.CENTER
             setOnClickListener { 
-                if (::rootView.isInitialized && rootView.isAttachedToWindow) {
-                    windowManager.removeView(rootView)
+                rootView?.let { 
+                    if (it.isAttachedToWindow()) {
+                        windowManager.removeView(it)
+                    }
                 }
                 stopSelf() 
             }
         }
-        rootView.addView(btnClose)
+        btnClose = closeBtn
+        mainRoot.addView(closeBtn)
 
         // Configuração inicial da janela
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -158,7 +163,7 @@ class OverlayService : Service() {
         params.x = 200
         params.y = 200
 
-        windowManager.addView(rootView, params)
+        windowManager.addView(mainRoot, params)
 
         // Detectores de Gestos
         setupGestures(glassPane)
@@ -170,15 +175,19 @@ class OverlayService : Service() {
             override fun onScale(detector: ScaleGestureDetector): Boolean {
                 scaleFactor *= detector.scaleFactor
                 scaleFactor = scaleFactor.coerceIn(0.1f, 5.0f)
-                container.scaleX = scaleFactor
-                container.scaleY = scaleFactor
+                container?.let {
+                    it.scaleX = scaleFactor
+                    it.scaleY = scaleFactor
+                }
                 return true
             }
         })
 
         gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                btnClose.visibility = if (btnClose.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                btnClose?.let {
+                    it.visibility = if (it.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                }
                 return true
             }
         })
@@ -203,7 +212,7 @@ class OverlayService : Service() {
                     MotionEvent.ACTION_MOVE -> {
                         params.x = initialX + (event.rawX - initialTouchX).toInt()
                         params.y = initialY + (event.rawY - initialTouchY).toInt()
-                        windowManager.updateViewLayout(rootView, params)
+                        rootView?.let { windowManager.updateViewLayout(it, params) }
                     }
                 }
             } else if (pointerCount == 2) {
@@ -216,7 +225,7 @@ class OverlayService : Service() {
                         val currentRotation = rotationAngle(event)
                         val delta = currentRotation - lastRotation
                         rotationAngle += delta
-                        container.rotation = rotationAngle
+                        container?.rotation = rotationAngle
                         lastRotation = currentRotation
                     }
                 }
@@ -234,8 +243,10 @@ class OverlayService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        if (::rootView.isInitialized) {
-            windowManager.removeView(rootView)
+        rootView?.let {
+            if (it.isAttachedToWindow()) {
+                windowManager.removeView(it)
+            }
         }
     }
 
