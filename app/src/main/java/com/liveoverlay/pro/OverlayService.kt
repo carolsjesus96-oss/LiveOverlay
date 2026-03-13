@@ -88,26 +88,30 @@ class OverlayService : Service() {
             setBackgroundColor(Color.parseColor("#CC0F0F12"))
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, 
-                (40 * resources.displayMetrics.density).toInt(),
+                (32 * resources.displayMetrics.density).toInt(),
                 Gravity.TOP
             )
         }
 
         val dragHandle = TextView(this).apply {
-            text = "⠿" // Ícone gráfico de arraste
+            text = "⠿"
             setTextColor(Color.WHITE)
-            textSize = 24f
+            textSize = 18f
             gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(0, -1, 1f)
         }
 
-        val btnPlus = createIconButton(android.R.drawable.ic_input_add)
-        val btnMinus = createIconButton(android.R.drawable.ic_input_delete) // Simplificado por falta de asset
-        val btnClose = createIconButton(android.R.drawable.ic_menu_close_clear_cancel)
+        val btnWidthPlus = createIconButton(android.R.drawable.ic_input_add, "+L")
+        val btnWidthMinus = createIconButton(android.R.drawable.ic_input_delete, "-L")
+        val btnHeightPlus = createIconButton(android.R.drawable.ic_input_add, "+A")
+        val btnHeightMinus = createIconButton(android.R.drawable.ic_input_delete, "-A")
+        val btnClose = createIconButton(android.R.drawable.ic_menu_close_clear_cancel, "")
 
-        controlBar.addView(btnMinus)
+        controlBar.addView(btnWidthMinus)
+        controlBar.addView(btnWidthPlus)
         controlBar.addView(dragHandle)
-        controlBar.addView(btnPlus)
+        controlBar.addView(btnHeightMinus)
+        controlBar.addView(btnHeightPlus)
         controlBar.addView(btnClose)
 
         rootView.addView(controlBar)
@@ -125,7 +129,8 @@ class OverlayService : Service() {
             type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                    WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT
         )
         params.gravity = Gravity.TOP or Gravity.START
@@ -159,29 +164,49 @@ class OverlayService : Service() {
             }
         }
 
-        // Redimensionamento
-        btnPlus.setOnClickListener {
-            params.width = (params.width * 1.1).toInt()
-            params.height = (params.height * 1.1).toInt()
+        // Redimensionamento Independente
+        btnWidthPlus.setOnClickListener {
+            params.width = (params.width + 50)
             windowManager.updateViewLayout(rootView, params)
         }
-
-        btnMinus.setOnClickListener {
-            params.width = (params.width * 0.9).toInt()
-            params.height = (params.height * 0.9).toInt()
+        btnWidthMinus.setOnClickListener {
+            params.width = (params.width - 50).coerceAtLeast(100)
+            windowManager.updateViewLayout(rootView, params)
+        }
+        btnHeightPlus.setOnClickListener {
+            params.height = (params.height + 50)
+            windowManager.updateViewLayout(rootView, params)
+        }
+        btnHeightMinus.setOnClickListener {
+            params.height = (params.height - 50).coerceAtLeast(100)
             windowManager.updateViewLayout(rootView, params)
         }
 
         btnClose.setOnClickListener { stopSelf() }
     }
 
-    private fun createIconButton(resId: Int): ImageView {
+    private fun createIconButton(resId: Int, label: String): View {
+        if (label.isNotEmpty()) {
+            return TextView(this).apply {
+                text = label
+                setTextColor(Color.WHITE)
+                textSize = 10f
+                gravity = Gravity.CENTER
+                setBackgroundResource(android.R.drawable.btn_default)
+                layoutParams = LinearLayout.LayoutParams(
+                    (24 * resources.displayMetrics.density).toInt(),
+                    (24 * resources.displayMetrics.density).toInt()
+                ).apply {
+                    setMargins(2, 0, 2, 0)
+                }
+            }
+        }
         return ImageView(this).apply {
             setImageResource(resId)
-            setPadding(20, 20, 20, 20)
+            setPadding(4, 4, 4, 4)
             layoutParams = LinearLayout.LayoutParams(
-                (40 * resources.displayMetrics.density).toInt(),
-                (40 * resources.displayMetrics.density).toInt()
+                (24 * resources.displayMetrics.density).toInt(),
+                (24 * resources.displayMetrics.density).toInt()
             )
             setColorFilter(Color.WHITE)
         }
