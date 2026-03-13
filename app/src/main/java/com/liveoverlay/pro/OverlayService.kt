@@ -19,7 +19,6 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import androidx.core.app.NotificationCompat
 import kotlin.math.atan2
-import kotlin.math.toDegrees
 
 class OverlayService : Service() {
 
