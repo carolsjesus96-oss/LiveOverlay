@@ -57,22 +57,18 @@ class OverlayService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val url = intent?.getStringExtra("URL")
         val imageUriString = intent?.getStringExtra("IMAGE_URI")
-        setupStealthOverlay(url, imageUriString)
+        
+        if (::rootView.isInitialized && rootView.isAttachedToWindow) {
+            // Se já existe, apenas atualiza o conteúdo se necessário
+            updateContent(url, imageUriString)
+        } else {
+            setupStealthOverlay(url, imageUriString)
+        }
         return START_NOT_STICKY
     }
 
-    @SuppressLint("ClickableViewAccessibility")
-    private fun setupStealthOverlay(url: String?, imageUriString: String?) {
-        // Root invisível
-        rootView = FrameLayout(this).apply {
-            setBackgroundColor(Color.TRANSPARENT)
-        }
-
-        container = FrameLayout(this).apply {
-            setBackgroundColor(Color.TRANSPARENT)
-        }
-
-        // WebView ou ImageView
+    private fun updateContent(url: String?, imageUriString: String?) {
+        container.removeAllViews()
         if (!imageUriString.isNullOrEmpty()) {
             val imageView = ImageView(this).apply {
                 setImageURI(Uri.parse(imageUriString))
@@ -95,24 +91,24 @@ class OverlayService : Service() {
             }
             container.addView(webView)
         }
+    }
 
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupStealthOverlay(url: String?, imageUriString: String?) {
+        // Root invisível
+        rootView = FrameLayout(this).apply {
+            setBackgroundColor(Color.TRANSPARENT)
+        }
+
+        container = FrameLayout(this).apply {
+            setBackgroundColor(Color.TRANSPARENT)
+        }
+        
+        // Adiciona container de conteúdo
+        updateContent(url, imageUriString)
         rootView.addView(container)
 
-        // Botão Fechar Fantasma (X)
-        btnClose = TextView(this).apply {
-            text = "✕"
-            setTextColor(Color.WHITE)
-            textSize = 16f
-            setShadowLayer(4f, 2f, 2f, Color.BLACK)
-            visibility = View.GONE
-            val size = (32 * resources.displayMetrics.density).toInt()
-            layoutParams = FrameLayout.LayoutParams(size, size, Gravity.TOP or Gravity.END)
-            gravity = Gravity.CENTER
-            setOnClickListener { stopSelf() }
-        }
-        rootView.addView(btnClose)
-
-        // Glass Pane - Interceptor de toques
+        // Glass Pane - Interceptor de toques (deve ficar ABAIXO do botão X)
         val glassPane = View(this).apply {
             setBackgroundColor(Color.TRANSPARENT)
             layoutParams = FrameLayout.LayoutParams(
@@ -121,6 +117,25 @@ class OverlayService : Service() {
             )
         }
         rootView.addView(glassPane)
+
+        // Botão Fechar Fantasma (X) - Deve ser o ÚLTIMO a ser adicionado para ficar no topo
+        btnClose = TextView(this).apply {
+            text = "✕"
+            setTextColor(Color.WHITE)
+            textSize = 20f
+            setShadowLayer(6f, 3f, 3f, Color.BLACK)
+            visibility = View.GONE
+            val size = (40 * resources.displayMetrics.density).toInt()
+            layoutParams = FrameLayout.LayoutParams(size, size, Gravity.TOP or Gravity.END)
+            gravity = Gravity.CENTER
+            setOnClickListener { 
+                if (::rootView.isInitialized && rootView.isAttachedToWindow) {
+                    windowManager.removeView(rootView)
+                }
+                stopSelf() 
+            }
+        }
+        rootView.addView(btnClose)
 
         // Configuração inicial da janela
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -131,7 +146,7 @@ class OverlayService : Service() {
         }
 
         params = WindowManager.LayoutParams(
-            800, 800, // Tamanho base corrigido
+            800, 800,
             type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
