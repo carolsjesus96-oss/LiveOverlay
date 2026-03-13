@@ -102,7 +102,7 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxWidth(),
                         placeholder = { Text("Cole o link do TikFinity", color = GrayText) },
                         leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null, tint = BlueElectric) },
-                        colors = OutlinedTextFieldDefaults.colors(
+                        colors = TextFieldDefaults.outlinedTextFieldColors(
                             unfocusedBorderColor = Color.DarkGray,
                             focusedBorderColor = BlueElectric,
                             cursorColor = BlueElectric
