@@ -51,31 +51,36 @@ class OverlayService : Service() {
     @SuppressLint("ClickableViewAccessibility")
     private fun createOverlayWindow(url: String?, imageUriString: String?) {
         val context = this
+        val baseSize = 1000f
+        var currentScale = 0.8f // Inicia com 800px (80% de 1000)
         
         // 1. Root da Janela
         val rootView = FrameLayout(context).apply {
             setBackgroundColor(Color.TRANSPARENT)
         }
 
-        // 2. Container de Conteúdo
+        // 2. Container de Conteúdo (Tamanho fixo para escala, sem crop)
         val container = FrameLayout(context).apply {
             setBackgroundColor(Color.TRANSPARENT)
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
+            layoutParams = FrameLayout.LayoutParams(baseSize.toInt(), baseSize.toInt())
+            pivotX = 0f
+            pivotY = 0f
+            scaleX = currentScale
+            scaleY = currentScale
         }
         
         if (!imageUriString.isNullOrEmpty()) {
             val imageView = ImageView(context).apply {
                 setImageURI(Uri.parse(imageUriString))
                 scaleType = ImageView.ScaleType.FIT_CENTER
+                layoutParams = FrameLayout.LayoutParams(-1, -1)
             }
             container.addView(imageView)
         } else if (!url.isNullOrEmpty()) {
             val webView = WebView(context).apply {
                 setLayerType(View.LAYER_TYPE_HARDWARE, null)
                 setBackgroundColor(Color.TRANSPARENT)
+                layoutParams = FrameLayout.LayoutParams(-1, -1)
                 settings.apply {
                     javaScriptEnabled = true
                     domStorageEnabled = true
@@ -93,11 +98,13 @@ class OverlayService : Service() {
         // 3. Glass Pane (Interceptor)
         val glassPane = View(context).apply {
             setBackgroundColor(Color.TRANSPARENT)
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
+            layoutParams = FrameLayout.LayoutParams(baseSize.toInt(), baseSize.toInt())
         }
+        // O interceptor também deve acompanhar a escala visual
+        glassPane.pivotX = 0f
+        glassPane.pivotY = 0f
+        glassPane.scaleX = currentScale
+        glassPane.scaleY = currentScale
         rootView.addView(glassPane)
 
         // 4. Botão Fechar (X)
@@ -107,13 +114,13 @@ class OverlayService : Service() {
             textSize = 20f
             setShadowLayer(6f, 3f, 3f, Color.BLACK)
             visibility = View.GONE
-            val size = (40 * resources.displayMetrics.density).toInt()
+            val size = (44 * resources.displayMetrics.density).toInt()
             layoutParams = FrameLayout.LayoutParams(size, size, Gravity.TOP or Gravity.END)
             gravity = Gravity.CENTER
         }
         rootView.addView(btnClose)
 
-        // 5. Configuração LayoutParams
+        // 5. Configuração LayoutParams (Janela Física)
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         } else {
@@ -122,7 +129,8 @@ class OverlayService : Service() {
         }
 
         val params = WindowManager.LayoutParams(
-            800, 800,
+            (baseSize * currentScale).toInt(),
+            (baseSize * currentScale).toInt(),
             type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
@@ -131,13 +139,19 @@ class OverlayService : Service() {
             PixelFormat.TRANSLUCENT
         )
         params.gravity = Gravity.TOP or Gravity.START
-        params.x = 200 + (overlayViews.size * 50) // Cascade effect
+        params.x = 200 + (overlayViews.size * 50)
         params.y = 200 + (overlayViews.size * 50)
 
         windowManager.addView(rootView, params)
         overlayViews.add(rootView)
 
         btnClose.setOnClickListener {
+            // Performance: Destruir WebView antes de remover
+            findWebView(container)?.let { 
+                it.stopLoading()
+                it.loadUrl("about:blank")
+                it.destroy() 
+            }
             windowManager.removeView(rootView)
             overlayViews.remove(rootView)
             if (overlayViews.isEmpty()) {
@@ -145,8 +159,19 @@ class OverlayService : Service() {
             }
         }
 
-        // 6. Gestos para esta janela específica
-        setupGestures(glassPane, rootView, container, btnClose, params)
+        setupGestures(glassPane, rootView, container, btnClose, params, baseSize)
+    }
+
+    private fun findWebView(view: View): WebView? {
+        if (view is WebView) return view
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                val child = view.getChildAt(i)
+                val result = findWebView(child)
+                if (result != null) return result
+            }
+        }
+        return null
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -155,16 +180,29 @@ class OverlayService : Service() {
         rootView: View, 
         container: View, 
         btnClose: TextView, 
-        params: WindowManager.LayoutParams
+        params: WindowManager.LayoutParams,
+        baseSize: Float
     ) {
         var rotationAngle = 0f
+        var totalScale = 0.8f
         
         val scaleDetector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(detector: ScaleGestureDetector): Boolean {
-                val scaleFactor = detector.scaleFactor
-                // Redimensionamento Real da Janela (Física)
-                params.width = (params.width * scaleFactor).toInt().coerceIn(100, 3000)
-                params.height = (params.height * scaleFactor).toInt().coerceIn(100, 3000)
+                totalScale *= detector.scaleFactor
+                totalScale = totalScale.coerceIn(0.1f, 5.0f)
+                
+                // 1. Redimensionamento Físico da Janela (Touch area)
+                params.width = (baseSize * totalScale).toInt()
+                params.height = (baseSize * totalScale).toInt()
+                
+                // 2. Escala Visual do Conteúdo (Sem Crop)
+                container.scaleX = totalScale
+                container.scaleY = totalScale
+                
+                // 3. Escala do GlassPane para manter precisão de toque
+                view.scaleX = totalScale
+                view.scaleY = totalScale
+                
                 windowManager.updateViewLayout(rootView, params)
                 return true
             }
@@ -190,7 +228,6 @@ class OverlayService : Service() {
             val pointerCount = event.pointerCount
 
             if (pointerCount == 1) {
-                // Arrastar
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
                         initialX = params.x
@@ -205,7 +242,6 @@ class OverlayService : Service() {
                     }
                 }
             } else if (pointerCount == 2) {
-                // Rotação Visual do Conteúdo
                 when (event.actionMasked) {
                     MotionEvent.ACTION_POINTER_DOWN -> {
                         lastRotation = rotationAngle(event)
