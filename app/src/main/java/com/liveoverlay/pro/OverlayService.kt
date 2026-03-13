@@ -22,22 +22,7 @@ import kotlin.math.atan2
 class OverlayService : Service() {
 
     private lateinit var windowManager: WindowManager
-    private var rootView: FrameLayout? = null
-    private var container: FrameLayout? = null
-    private var btnClose: TextView? = null
-    private lateinit var params: WindowManager.LayoutParams
-    
-    // Gesture state
-    private var initialX = 0
-    private var initialY = 0
-    private var initialTouchX = 0f
-    private var initialTouchY = 0f
-    
-    private var scaleFactor = 1.0f
-    private var rotationAngle = 0f
-    
-    private lateinit var scaleDetector: ScaleGestureDetector
-    private lateinit var gestureDetector: GestureDetector
+    private val overlayViews = mutableListOf<View>()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -45,8 +30,8 @@ class OverlayService : Service() {
         super.onCreate()
         createNotificationChannel()
         val notification = NotificationCompat.Builder(this, "PRO_CHANNEL")
-            .setContentTitle("LiveOverlay Stealth")
-            .setContentText("Controle por gestos ativo")
+            .setContentTitle("LiveOverlay PRO Multi")
+            .setContentText("Múltiplas instâncias ativas")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .build()
         startForeground(1, notification)
@@ -58,26 +43,37 @@ class OverlayService : Service() {
         val url = intent?.getStringExtra("URL")
         val imageUriString = intent?.getStringExtra("IMAGE_URI")
         
-        if (rootView != null && rootView!!.isAttachedToWindow()) {
-            // Se já existe, apenas atualiza o conteúdo se necessário
-            updateContent(url, imageUriString)
-        } else {
-            setupStealthOverlay(url, imageUriString)
-        }
+        createOverlayWindow(url, imageUriString)
+        
         return START_NOT_STICKY
     }
 
-    private fun updateContent(url: String?, imageUriString: String?) {
-        val currentContainer = container ?: return
-        currentContainer.removeAllViews()
+    @SuppressLint("ClickableViewAccessibility")
+    private fun createOverlayWindow(url: String?, imageUriString: String?) {
+        val context = this
+        
+        // 1. Root da Janela
+        val rootView = FrameLayout(context).apply {
+            setBackgroundColor(Color.TRANSPARENT)
+        }
+
+        // 2. Container de Conteúdo
+        val container = FrameLayout(context).apply {
+            setBackgroundColor(Color.TRANSPARENT)
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        }
+        
         if (!imageUriString.isNullOrEmpty()) {
-            val imageView = ImageView(this).apply {
+            val imageView = ImageView(context).apply {
                 setImageURI(Uri.parse(imageUriString))
                 scaleType = ImageView.ScaleType.FIT_CENTER
             }
-            currentContainer.addView(imageView)
+            container.addView(imageView)
         } else if (!url.isNullOrEmpty()) {
-            val webView = WebView(this).apply {
+            val webView = WebView(context).apply {
                 setLayerType(View.LAYER_TYPE_HARDWARE, null)
                 setBackgroundColor(Color.TRANSPARENT)
                 settings.apply {
@@ -90,38 +86,22 @@ class OverlayService : Service() {
                 webChromeClient = WebChromeClient()
                 loadUrl(url)
             }
-            currentContainer.addView(webView)
+            container.addView(webView)
         }
-    }
+        rootView.addView(container)
 
-    @SuppressLint("ClickableViewAccessibility")
-    private fun setupStealthOverlay(url: String?, imageUriString: String?) {
-        val mainRoot = FrameLayout(this).apply {
-            setBackgroundColor(Color.TRANSPARENT)
-        }
-        rootView = mainRoot
-
-        val mainContainer = FrameLayout(this).apply {
-            setBackgroundColor(Color.TRANSPARENT)
-        }
-        container = mainContainer
-        
-        // Adiciona container de conteúdo
-        updateContent(url, imageUriString)
-        mainRoot.addView(mainContainer)
-
-        // Glass Pane - Interceptor de toques (deve ficar ABAIXO do botão X)
-        val glassPane = View(this).apply {
+        // 3. Glass Pane (Interceptor)
+        val glassPane = View(context).apply {
             setBackgroundColor(Color.TRANSPARENT)
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
         }
-        mainRoot.addView(glassPane)
+        rootView.addView(glassPane)
 
-        // Botão Fechar Fantasma (X) - Deve ser o ÚLTIMO a ser adicionado para ficar no topo
-        val closeBtn = TextView(this).apply {
+        // 4. Botão Fechar (X)
+        val btnClose = TextView(context).apply {
             text = "✕"
             setTextColor(Color.WHITE)
             textSize = 20f
@@ -130,19 +110,10 @@ class OverlayService : Service() {
             val size = (40 * resources.displayMetrics.density).toInt()
             layoutParams = FrameLayout.LayoutParams(size, size, Gravity.TOP or Gravity.END)
             gravity = Gravity.CENTER
-            setOnClickListener { 
-                rootView?.let { 
-                    if (it.isAttachedToWindow()) {
-                        windowManager.removeView(it)
-                    }
-                }
-                stopSelf() 
-            }
         }
-        btnClose = closeBtn
-        mainRoot.addView(closeBtn)
+        rootView.addView(btnClose)
 
-        // Configuração inicial da janela
+        // 5. Configuração LayoutParams
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         } else {
@@ -150,7 +121,7 @@ class OverlayService : Service() {
             WindowManager.LayoutParams.TYPE_PHONE
         }
 
-        params = WindowManager.LayoutParams(
+        val params = WindowManager.LayoutParams(
             800, 800,
             type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
@@ -160,38 +131,56 @@ class OverlayService : Service() {
             PixelFormat.TRANSLUCENT
         )
         params.gravity = Gravity.TOP or Gravity.START
-        params.x = 200
-        params.y = 200
+        params.x = 200 + (overlayViews.size * 50) // Cascade effect
+        params.y = 200 + (overlayViews.size * 50)
 
-        windowManager.addView(mainRoot, params)
+        windowManager.addView(rootView, params)
+        overlayViews.add(rootView)
 
-        // Detectores de Gestos
-        setupGestures(glassPane)
+        btnClose.setOnClickListener {
+            windowManager.removeView(rootView)
+            overlayViews.remove(rootView)
+            if (overlayViews.isEmpty()) {
+                stopSelf()
+            }
+        }
+
+        // 6. Gestos para esta janela específica
+        setupGestures(glassPane, rootView, container, btnClose, params)
     }
 
     @SuppressLint("ClickableViewAccessibility")
-    private fun setupGestures(view: View) {
-        scaleDetector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+    private fun setupGestures(
+        view: View, 
+        rootView: View, 
+        container: View, 
+        btnClose: TextView, 
+        params: WindowManager.LayoutParams
+    ) {
+        var rotationAngle = 0f
+        
+        val scaleDetector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(detector: ScaleGestureDetector): Boolean {
-                scaleFactor *= detector.scaleFactor
-                scaleFactor = scaleFactor.coerceIn(0.1f, 5.0f)
-                container?.let {
-                    it.scaleX = scaleFactor
-                    it.scaleY = scaleFactor
-                }
+                val scaleFactor = detector.scaleFactor
+                // Redimensionamento Real da Janela (Física)
+                params.width = (params.width * scaleFactor).toInt().coerceIn(100, 3000)
+                params.height = (params.height * scaleFactor).toInt().coerceIn(100, 3000)
+                windowManager.updateViewLayout(rootView, params)
                 return true
             }
         })
 
-        gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+        val gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                btnClose?.let {
-                    it.visibility = if (it.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-                }
+                btnClose.visibility = if (btnClose.visibility == View.VISIBLE) View.GONE else View.VISIBLE
                 return true
             }
         })
 
+        var initialX = 0
+        var initialY = 0
+        var initialTouchX = 0f
+        var initialTouchY = 0f
         var lastRotation = 0f
 
         view.setOnTouchListener { _, event ->
@@ -212,11 +201,11 @@ class OverlayService : Service() {
                     MotionEvent.ACTION_MOVE -> {
                         params.x = initialX + (event.rawX - initialTouchX).toInt()
                         params.y = initialY + (event.rawY - initialTouchY).toInt()
-                        rootView?.let { windowManager.updateViewLayout(it, params) }
+                        windowManager.updateViewLayout(rootView, params)
                     }
                 }
             } else if (pointerCount == 2) {
-                // Rotação
+                // Rotação Visual do Conteúdo
                 when (event.actionMasked) {
                     MotionEvent.ACTION_POINTER_DOWN -> {
                         lastRotation = rotationAngle(event)
@@ -225,7 +214,7 @@ class OverlayService : Service() {
                         val currentRotation = rotationAngle(event)
                         val delta = currentRotation - lastRotation
                         rotationAngle += delta
-                        container?.rotation = rotationAngle
+                        container.rotation = rotationAngle
                         lastRotation = currentRotation
                     }
                 }
@@ -243,11 +232,12 @@ class OverlayService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        rootView?.let {
-            if (it.isAttachedToWindow()) {
-                windowManager.removeView(it)
-            }
+        for (view in overlayViews) {
+            try {
+                windowManager.removeView(view)
+            } catch (e: Exception) {}
         }
+        overlayViews.clear()
     }
 
     private fun createNotificationChannel() {

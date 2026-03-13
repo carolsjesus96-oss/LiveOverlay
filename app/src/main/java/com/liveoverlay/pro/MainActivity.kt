@@ -150,7 +150,14 @@ class MainActivity : ComponentActivity() {
             Spacer(modifier = Modifier.weight(1f))
 
             Button(
-                onClick = { startProOverlay(urlText, imageUri) },
+                onClick = { 
+                    if (urlText.isNotBlank()) {
+                        startProOverlay(urlText, null)
+                    }
+                    if (imageUri != null) {
+                        startProOverlay("", imageUri)
+                    }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(64.dp)
@@ -177,8 +184,8 @@ class MainActivity : ComponentActivity() {
             startActivity(intent)
         } else {
             val serviceIntent = Intent(this, OverlayService::class.java).apply {
-                putExtra("URL", url)
-                putExtra("IMAGE_URI", imageUri)
+                if (url.isNotBlank()) putExtra("URL", url)
+                if (imageUri != null) putExtra("IMAGE_URI", imageUri)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(serviceIntent)
