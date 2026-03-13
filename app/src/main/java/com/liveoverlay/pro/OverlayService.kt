@@ -49,11 +49,9 @@ class OverlayService : Service() {
     private fun setupProOverlay(url: String?, imageUriString: String?) {
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
-        // Root com moldura azul elétrica
+        // Root transparente
         rootView = FrameLayout(this).apply {
-            val padding = (2 * resources.displayMetrics.density).toInt()
-            setPadding(padding, padding, padding, padding)
-            setBackgroundColor(Color.parseColor("#007BFF")) // Moldura Azul Elétrico
+            setBackgroundColor(Color.TRANSPARENT)
         }
 
         val container = FrameLayout(this).apply {
@@ -73,6 +71,7 @@ class OverlayService : Service() {
                 setBackgroundColor(Color.TRANSPARENT)
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
+                settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                 webViewClient = WebViewClient()
                 loadUrl(url)
             }
@@ -96,7 +95,7 @@ class OverlayService : Service() {
         val dragHandle = TextView(this).apply {
             text = "⠿"
             setTextColor(Color.WHITE)
-            textSize = 18f
+            textSize = 14f
             gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(0, -1, 1f)
         }
@@ -190,23 +189,23 @@ class OverlayService : Service() {
             return TextView(this).apply {
                 text = label
                 setTextColor(Color.WHITE)
-                textSize = 10f
+                textSize = 8f
                 gravity = Gravity.CENTER
                 setBackgroundResource(android.R.drawable.btn_default)
                 layoutParams = LinearLayout.LayoutParams(
-                    (24 * resources.displayMetrics.density).toInt(),
-                    (24 * resources.displayMetrics.density).toInt()
+                    (20 * resources.displayMetrics.density).toInt(),
+                    (20 * resources.displayMetrics.density).toInt()
                 ).apply {
-                    setMargins(2, 0, 2, 0)
+                    setMargins(1, 0, 1, 0)
                 }
             }
         }
         return ImageView(this).apply {
             setImageResource(resId)
-            setPadding(4, 4, 4, 4)
+            setPadding(2, 2, 2, 2)
             layoutParams = LinearLayout.LayoutParams(
-                (24 * resources.displayMetrics.density).toInt(),
-                (24 * resources.displayMetrics.density).toInt()
+                (20 * resources.displayMetrics.density).toInt(),
+                (20 * resources.displayMetrics.density).toInt()
             )
             setColorFilter(Color.WHITE)
         }
