@@ -1,5 +1,6 @@
 package com.liveoverlay.pro
 
+import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -7,24 +8,36 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
-import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.view.*
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.ImageView
-import android.widget.LinearLayout
-import android.widget.TextView
 import androidx.core.app.NotificationCompat
+import kotlin.math.atan2
+import kotlin.math.toDegrees
 
 class OverlayService : Service() {
 
     private lateinit var windowManager: WindowManager
     private lateinit var rootView: FrameLayout
+    private lateinit var container: FrameLayout
     private lateinit var params: WindowManager.LayoutParams
+    
+    // Gesture state
+    private var initialX = 0
+    private var initialY = 0
+    private var initialTouchX = 0f
+    private var initialTouchY = 0f
+    
+    private var scaleFactor = 1.0f
+    private var rotationAngle = 0f
+    
+    private lateinit var scaleDetector: ScaleGestureDetector
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -32,29 +45,30 @@ class OverlayService : Service() {
         super.onCreate()
         createNotificationChannel()
         val notification = NotificationCompat.Builder(this, "PRO_CHANNEL")
-            .setContentTitle("LiveOverlay PRO")
-            .setContentText("Sobreposição Gamer Ativa")
+            .setContentTitle("LiveOverlay Steath")
+            .setContentText("Controle por gestos ativo")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .build()
         startForeground(1, notification)
+        
+        windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val url = intent?.getStringExtra("URL")
         val imageUriString = intent?.getStringExtra("IMAGE_URI")
-        setupProOverlay(url, imageUriString)
+        setupStealthOverlay(url, imageUriString)
         return START_NOT_STICKY
     }
 
-    private fun setupProOverlay(url: String?, imageUriString: String?) {
-        windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-
-        // Root transparente
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupStealthOverlay(url: String?, imageUriString: String?) {
+        // Root invisível
         rootView = FrameLayout(this).apply {
             setBackgroundColor(Color.TRANSPARENT)
         }
 
-        val container = FrameLayout(this).apply {
+        container = FrameLayout(this).apply {
             setBackgroundColor(Color.TRANSPARENT)
         }
 
@@ -69,9 +83,11 @@ class OverlayService : Service() {
             val webView = WebView(this).apply {
                 setLayerType(View.LAYER_TYPE_HARDWARE, null)
                 setBackgroundColor(Color.TRANSPARENT)
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
-                settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                settings.apply {
+                    javaScriptEnabled = true
+                    domStorageEnabled = true
+                    mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                }
                 webViewClient = WebViewClient()
                 loadUrl(url)
             }
@@ -80,41 +96,17 @@ class OverlayService : Service() {
 
         rootView.addView(container)
 
-        // Barra de Controle Superior (Transparente com handle e botões)
-        val controlBar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(Color.parseColor("#CC0F0F12"))
+        // Glass Pane - Interceptor de toques
+        val glassPane = View(this).apply {
+            setBackgroundColor(Color.TRANSPARENT)
             layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, 
-                (32 * resources.displayMetrics.density).toInt(),
-                Gravity.TOP
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
             )
         }
+        rootView.addView(glassPane)
 
-        val dragHandle = TextView(this).apply {
-            text = "⠿"
-            setTextColor(Color.WHITE)
-            textSize = 14f
-            gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(0, -1, 1f)
-        }
-
-        val btnWidthPlus = createIconButton(android.R.drawable.ic_input_add, "+L")
-        val btnWidthMinus = createIconButton(android.R.drawable.ic_input_delete, "-L")
-        val btnHeightPlus = createIconButton(android.R.drawable.ic_input_add, "+A")
-        val btnHeightMinus = createIconButton(android.R.drawable.ic_input_delete, "-A")
-        val btnClose = createIconButton(android.R.drawable.ic_menu_close_clear_cancel, "")
-
-        controlBar.addView(btnWidthMinus)
-        controlBar.addView(btnWidthPlus)
-        controlBar.addView(dragHandle)
-        controlBar.addView(btnHeightMinus)
-        controlBar.addView(btnHeightPlus)
-        controlBar.addView(btnClose)
-
-        rootView.addView(controlBar)
-
+        // Configuração inicial da janela
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         } else {
@@ -123,8 +115,7 @@ class OverlayService : Service() {
         }
 
         params = WindowManager.LayoutParams(
-            800,
-            600,
+            600, 600, // Tamanho base
             type,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
@@ -133,82 +124,73 @@ class OverlayService : Service() {
             PixelFormat.TRANSLUCENT
         )
         params.gravity = Gravity.TOP or Gravity.START
-        params.x = 100
-        params.y = 100
+        params.x = 200
+        params.y = 200
 
         windowManager.addView(rootView, params)
 
-        // Lógica de movimentação
-        var initialX = 0
-        var initialY = 0
-        var initialTouchX = 0f
-        var initialTouchY = 0f
-
-        dragHandle.setOnTouchListener { _, event ->
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    initialX = params.x
-                    initialY = params.y
-                    initialTouchX = event.rawX
-                    initialTouchY = event.rawY
-                    true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    params.x = initialX + (event.rawX - initialTouchX).toInt()
-                    params.y = initialY + (event.rawY - initialTouchY).toInt()
-                    windowManager.updateViewLayout(rootView, params)
-                    true
-                }
-                else -> false
-            }
-        }
-
-        // Redimensionamento Independente
-        btnWidthPlus.setOnClickListener {
-            params.width = (params.width + 50)
-            windowManager.updateViewLayout(rootView, params)
-        }
-        btnWidthMinus.setOnClickListener {
-            params.width = (params.width - 50).coerceAtLeast(100)
-            windowManager.updateViewLayout(rootView, params)
-        }
-        btnHeightPlus.setOnClickListener {
-            params.height = (params.height + 50)
-            windowManager.updateViewLayout(rootView, params)
-        }
-        btnHeightMinus.setOnClickListener {
-            params.height = (params.height - 50).coerceAtLeast(100)
-            windowManager.updateViewLayout(rootView, params)
-        }
-
-        btnClose.setOnClickListener { stopSelf() }
+        // Detectores de Gestos
+        setupGestures(glassPane)
     }
 
-    private fun createIconButton(resId: Int, label: String): View {
-        if (label.isNotEmpty()) {
-            return TextView(this).apply {
-                text = label
-                setTextColor(Color.WHITE)
-                textSize = 8f
-                gravity = Gravity.CENTER
-                setBackgroundResource(android.R.drawable.btn_default)
-                layoutParams = LinearLayout.LayoutParams(
-                    (20 * resources.displayMetrics.density).toInt(),
-                    (20 * resources.displayMetrics.density).toInt()
-                ).apply {
-                    setMargins(1, 0, 1, 0)
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupGestures(view: View) {
+        scaleDetector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                scaleFactor *= detector.scaleFactor
+                scaleFactor = scaleFactor.coerceIn(0.1f, 5.0f)
+                container.scaleX = scaleFactor
+                container.scaleY = scaleFactor
+                return true
+            }
+        })
+
+        var lastRotation = 0f
+
+        view.setOnTouchListener { _, event ->
+            scaleDetector.onTouchEvent(event)
+            
+            val pointerCount = event.pointerCount
+
+            if (pointerCount == 1) {
+                // Arrastar
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> {
+                        initialX = params.x
+                        initialY = params.y
+                        initialTouchX = event.rawX
+                        initialTouchY = event.rawY
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        params.x = initialX + (event.rawX - initialTouchX).toInt()
+                        params.y = initialY + (event.rawY - initialTouchY).toInt()
+                        windowManager.updateViewLayout(rootView, params)
+                    }
+                }
+            } else if (pointerCount == 2) {
+                // Rotação
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_POINTER_DOWN -> {
+                        lastRotation = rotationAngle(event)
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val currentRotation = rotationAngle(event)
+                        val delta = currentRotation - lastRotation
+                        rotationAngle += delta
+                        container.rotation = rotationAngle
+                        lastRotation = currentRotation
+                    }
                 }
             }
+            true
         }
-        return ImageView(this).apply {
-            setImageResource(resId)
-            setPadding(2, 2, 2, 2)
-            layoutParams = LinearLayout.LayoutParams(
-                (20 * resources.displayMetrics.density).toInt(),
-                (20 * resources.displayMetrics.density).toInt()
-            )
-            setColorFilter(Color.WHITE)
-        }
+    }
+
+    private fun rotationAngle(event: MotionEvent): Float {
+        val dx = (event.getX(0) - event.getX(1)).toDouble()
+        val dy = (event.getY(0) - event.getY(1)).toDouble()
+        val radians = atan2(dy, dx)
+        return Math.toDegrees(radians).toFloat()
     }
 
     override fun onDestroy() {
@@ -222,7 +204,7 @@ class OverlayService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 "PRO_CHANNEL",
-                "LiveOverlay PRO Service",
+                "LiveOverlay Stealth",
                 NotificationManager.IMPORTANCE_LOW
             )
             val manager = getSystemService(NotificationManager::class.java)
